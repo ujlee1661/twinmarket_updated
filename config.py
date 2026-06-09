@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 PROMPT_DIR = PROJECT_ROOT / "prompts"
+LOG_DIR = OUTPUT_DIR / "logs"
 
 SYS_1000_DB = DATA_DIR / "sys_1000.db"
 SYS_1000_CSV = DATA_DIR / "sys_1000.csv"

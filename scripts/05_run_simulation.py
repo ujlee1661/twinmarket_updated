@@ -17,12 +17,14 @@ def main() -> None:
     parser.add_argument("--max-agents", type=int, default=None)
     parser.add_argument("--max-days", type=int, default=None)
     parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--no-logs", action="store_true", help="Disable detailed output logs.")
     args = parser.parse_args()
     asyncio.run(
         run_simulation(
             max_agents=args.max_agents,
             max_days=args.max_days,
             concurrency=args.concurrency,
+            enable_logs=not args.no_logs,
         )
     )
 

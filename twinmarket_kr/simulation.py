@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+from collections import defaultdict
 from typing import Any
 
 import config
@@ -11,6 +13,7 @@ from twinmarket_kr.agents.news_agent import NewsAgent
 from twinmarket_kr.core.daily_cycle import run_agent_turn
 from twinmarket_kr.db.connection import connect
 from twinmarket_kr.llm.client import OpenRouterClient
+from twinmarket_kr.run_logger import SimulationLogger
 
 
 def trading_dates(limit: int | None = None) -> list[str]:
@@ -20,7 +23,17 @@ def trading_dates(limit: int | None = None) -> list[str]:
             (config.STOCK_CODE,),
         ).fetchall()
     dates = [str(row["date"]) for row in rows]
+    news_dates = _daily_news_dates()
+    if news_dates:
+        dates = [day for day in dates if day in news_dates]
     return dates[:limit] if limit else dates
+
+
+def _daily_news_dates() -> set[str]:
+    if not config.DAILY_NEWS_SELECTION_CSV.exists():
+        return set()
+    with config.DAILY_NEWS_SELECTION_CSV.open(encoding="utf-8-sig", newline="") as f:
+        return {row["date"] for row in csv.DictReader(f) if row.get("date")}
 
 
 async def run_simulation(
@@ -28,6 +41,7 @@ async def run_simulation(
     max_agents: int | None = None,
     max_days: int | None = None,
     concurrency: int = 8,
+    enable_logs: bool = True,
 ) -> None:
     agents = load_agents_from_sys100(config.SYS_100_DB)
     if max_agents:
@@ -42,18 +56,38 @@ async def run_simulation(
     exchange = ExchangeAgent(config.SIM_DB)
     client = OpenRouterClient()
     semaphore = asyncio.Semaphore(concurrency)
+    logger = (
+        SimulationLogger(
+            metadata={
+                "max_agents": max_agents,
+                "max_days": max_days,
+                "concurrency": concurrency,
+                "agent_count": len(agents),
+                "date_count": len(dates),
+                "sim_db": str(config.SIM_DB),
+            }
+        )
+        if enable_logs
+        else None
+    )
 
     async def guarded_turn(agent: dict[str, Any], turn: int, day: str) -> dict[str, Any] | None:
         async with semaphore:
-            return await run_agent_turn(
-                agent,
-                turn=turn,
-                date=day,
-                memory_agent=memory,
-                fundamental_agent=fundamental,
-                news_agent=news,
-                client=client,
-            )
+            try:
+                return await run_agent_turn(
+                    agent,
+                    turn=turn,
+                    date=day,
+                    memory_agent=memory,
+                    fundamental_agent=fundamental,
+                    news_agent=news,
+                    client=client,
+                    event_logger=logger,
+                )
+            except Exception as exc:
+                if logger is not None:
+                    logger.log_agent_error(agent=agent, turn=turn, date=day, error=exc)
+                raise
 
     for index, day in enumerate(dates, start=1):
         orders = [
@@ -70,4 +104,81 @@ async def run_simulation(
             current_date=day,
             day_number=index,
         )
+        if logger is not None:
+            logger.log_daily_exchange(date=day, turn=index, orders=orders, results=results)
+        _update_portfolios_from_results(
+            memory=memory,
+            agents=agents,
+            turn=index,
+            date=day,
+            results=results,
+            current_prices={config.STOCK_CODE: real_price},
+            logger=logger,
+        )
         print(f"{day} turn={index} orders={len(orders)} volume={results[config.STOCK_CODE]['volume']}")
+    if logger is not None:
+        logger.write_json(
+            "run_complete.json",
+            {
+                "run_id": logger.run_id,
+                "agent_count": len(agents),
+                "date_count": len(dates),
+                "log_dir": str(logger.run_dir),
+            },
+        )
+        print(f"log_dir={logger.run_dir}")
+
+
+def _update_portfolios_from_results(
+    *,
+    memory: MemoryAgent,
+    agents: list[dict[str, Any]],
+    turn: int,
+    date: str,
+    results: dict[str, dict[str, Any]],
+    current_prices: dict[str, float],
+    logger: SimulationLogger | None,
+) -> None:
+    fills_by_agent: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for stock_code, result in results.items():
+        for tx in result.get("transactions") or []:
+            user_id = str(tx.get("user_id") or "")
+            if not user_id or user_id == "INSTITUTIONAL":
+                continue
+            quantity = int(tx.get("executed_quantity", 0))
+            price = float(tx.get("executed_price", 0))
+            fills_by_agent[user_id].append(
+                {
+                    "user_id": user_id,
+                    "stock_code": tx.get("stock_code", stock_code),
+                    "direction": tx.get("direction"),
+                    "quantity": quantity,
+                    "price": price,
+                    "fee": abs(quantity * price) * config.COMMISSION_RATE,
+                }
+            )
+    for agent in agents:
+        agent_id = str(agent["agent_id"])
+        fills = fills_by_agent.get(agent_id, [])
+        if not fills:
+            continue
+        state = memory.update_portfolio(
+            agent_id,
+            turn,
+            date,
+            fills,
+            current_prices=current_prices,
+        )
+        if logger is not None:
+            logger.write_jsonl(
+                "portfolio_updates.jsonl",
+                {
+                    "run_id": logger.run_id,
+                    "event": "portfolio_update",
+                    "date": date,
+                    "turn": turn,
+                    "agent_id": agent_id,
+                    "fills": fills,
+                    "state": state,
+                },
+            )

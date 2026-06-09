@@ -8,6 +8,7 @@ from twinmarket_kr.agents.fundamental_agent import FundamentalAgent
 from twinmarket_kr.agents.memory_agent import MemoryAgent
 from twinmarket_kr.agents.news_agent import NewsAgent
 from twinmarket_kr.core.collect_context import collect_context
+from twinmarket_kr.llm.analysis import analyze_market, interpret_news
 from twinmarket_kr.llm.belief import update_belief
 from twinmarket_kr.llm.client import OpenRouterClient
 from twinmarket_kr.llm.decision import build_trading_constraints, make_decision
@@ -34,6 +35,7 @@ async def run_agent_turn(
     fundamental_agent: FundamentalAgent,
     news_agent: NewsAgent,
     client: OpenRouterClient | None = None,
+    event_logger: Any | None = None,
 ) -> dict[str, Any] | None:
     today_context = collect_context(
         agent,
@@ -43,6 +45,17 @@ async def run_agent_turn(
         fundamental_agent=fundamental_agent,
         news_agent=news_agent,
     )
+    news_interpretation = await interpret_news(
+        agent,
+        today_context["news_context"],
+        client=client,
+    )
+    today_context["news_context"] = news_agent.expand_context_from_selection(
+        base_context=today_context["news_context"],
+        selected_news=list(news_interpretation.get("selected_news") or []),
+        current_date=date,
+    )
+    today_context["news_interpretation"] = news_interpretation
     today_belief = await update_belief(
         agent,
         today_context,
@@ -56,9 +69,18 @@ async def run_agent_turn(
         current_quantity=current_quantity,
         current_price=current_price,
     )
+    market_analysis = await analyze_market(
+        agent,
+        today_belief=today_belief,
+        market_features=today_context["market_features"],
+        portfolio_summary=today_context["portfolio_summary"],
+        news_interpretation=news_interpretation,
+        client=client,
+    )
     decision = await make_decision(
         agent,
         today_belief,
+        market_analysis,
         today_context["portfolio_summary"],
         constraints,
         client=client,
@@ -76,14 +98,27 @@ async def run_agent_turn(
             "risk_control": decision["risk_control"],
         }
     )
-    if decision["action"] == "hold" or decision["quantity"] <= 0:
-        return None
-    return {
-        "stock_code": config.STOCK_CODE,
-        "user_id": agent["agent_id"],
-        "direction": decision["action"],
-        "quantity": decision["quantity"],
-        "price": decision["price"] if decision["order_type"] == "limit" else 0,
-        "timestamp": float(turn),
-        "reason": decision["reason"],
-    }
+    order = None
+    if decision["action"] != "hold" and decision["quantity"] > 0:
+        order = {
+            "stock_code": config.STOCK_CODE,
+            "user_id": agent["agent_id"],
+            "direction": decision["action"],
+            "quantity": decision["quantity"],
+            "price": decision["price"] if decision["order_type"] == "limit" else 0,
+            "timestamp": float(turn),
+            "reason": decision["reason"],
+        }
+    if event_logger is not None:
+        event_logger.log_agent_turn(
+            agent=agent,
+            turn=turn,
+            date=date,
+            context=today_context,
+            news_interpretation=news_interpretation,
+            belief=today_belief,
+            market_analysis=market_analysis,
+            decision=decision,
+            order=order,
+        )
+    return order

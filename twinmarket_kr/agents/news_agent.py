@@ -15,6 +15,12 @@ STOCK_KEYWORDS = ("삼성전자", "005930", "갤럭시", "DS부문", "파운드�
 SECTOR_KEYWORDS = ("반도체", "HBM", "메모리", "파운드리", "AI 반도체", "2나노", "장비", "낸드", "DRAM")
 ECONOMY_KEYWORDS = ("금리", "환율", "수출", "물가", "경기", "정책", "원달러", "외국인", "코스피", "미국")
 CATEGORY_TARGETS = {"종목": 5, "섹터": 3, "경제": 2}
+DEFAULT_DEPTH2_FIELDS = (
+    {"field": "HBM", "keywords": ["HBM", "메모리", "고대역폭"]},
+    {"field": "파운드리", "keywords": ["파운드리", "2나노", "수주"]},
+    {"field": "반도체 업황", "keywords": ["반도체", "업황", "수출", "장비"]},
+    {"field": "거시 수급", "keywords": ["금리", "환율", "외국인", "코스피"]},
+)
 
 
 def _parse_date(value: str) -> date:
@@ -70,6 +76,8 @@ def _raw_records(raw: Any) -> list[dict[str, Any]]:
             if isinstance(raw.get(key), list):
                 return [dict(item) for item in raw[key] if isinstance(item, dict)]
         return [dict(value) for value in raw.values() if isinstance(value, dict)]
+    if hasattr(raw, "to_dict") and hasattr(raw, "columns"):
+        return [dict(item) for item in raw.to_dict("records")]
     raise TypeError(f"unsupported raw news format: {type(raw)!r}")
 
 
@@ -98,7 +106,9 @@ def prepare_news(
         if key in seen:
             continue
         seen.add(key)
-        time_text = str(item.get("time") or item.get("published_time") or item.get("datetime") or "")[11:16]
+        raw_time = str(item.get("time") or item.get("published_time") or item.get("datetime") or "")
+        time_match = re.search(r"\d{2}:\d{2}", raw_time)
+        time_text = time_match.group(0) if time_match else ""
         content = item.get("summary") or item.get("content") or item.get("body") or ""
         summary = _summarize(str(content))
         category = _normalize_category(str(item.get("category") or item.get("type") or ""), title, summary)
@@ -167,7 +177,12 @@ class NewsAgent:
 
     def get_daily_titles(self, target_date: str) -> list[dict[str, str]]:
         return [
-            {key: row[key] for key in ("id", "title", "date", "category")}
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "date": row["date"],
+                "type": row.get("category", ""),
+            }
             for row in self._daily
             if row.get("date") == target_date
         ]
@@ -202,6 +217,7 @@ class NewsAgent:
                 break
         return [
             {
+                "id": row["id"],
                 "title": row["title"],
                 "date": row["date"],
                 "content": row.get("summary", ""),
@@ -236,13 +252,100 @@ class NewsAgent:
                     scored.append((score, row))
             scored.sort(key=lambda item: (-item[0], item[1]["date"], item[1]["title"]))
             result[field_name] = [
-                {"title": row["title"], "date": row["date"], "type": row["category"]}
+                {"id": row["id"], "title": row["title"], "date": row["date"], "type": row["category"]}
                 for _, row in scored[:max_per_field]
             ]
         return result
 
-    def build_base_context(self, target_date: str) -> dict[str, Any]:
-        return {"daily_titles": self.get_daily_titles(target_date), "read_contents": []}
+    def build_base_context(self, target_date: str, news_depth: int = 1) -> dict[str, Any]:
+        return {
+            "news_depth": news_depth,
+            "daily_titles": self.get_daily_titles(target_date),
+            "read_contents": [],
+            "search_results": {},
+            "search_read_contents": [],
+            "limits": {
+                "daily_read_max": 3,
+                "search_fields_max": 4 if news_depth >= 2 else 0,
+                "search_read_max": 5 if news_depth >= 2 else 0,
+                "lookback_days": 7 if news_depth >= 2 else 0,
+            },
+        }
+
+    def expand_context_from_selection(
+        self,
+        *,
+        base_context: dict[str, Any],
+        selected_news: list[Any],
+        current_date: str,
+    ) -> dict[str, Any]:
+        news_depth = int(base_context.get("news_depth") or 1)
+        daily_titles = base_context.get("daily_titles") or []
+        allowed_daily_ids = {str(row.get("id")) for row in daily_titles if row.get("id")}
+        selected_ids, selected_titles = self._normalize_selected_news(selected_news)
+        read_contents = self.read_news(
+            ids=selected_ids,
+            titles=selected_titles,
+            allowed_ids=allowed_daily_ids,
+            max_items=3,
+        )
+
+        search_results: dict[str, list[dict[str, str]]] = {}
+        search_read_contents: list[dict[str, str]] = []
+        if news_depth >= 2:
+            fields = self._depth2_search_fields(read_contents, daily_titles)
+            search_results = self.search_news(fields=fields, current_date=current_date)
+            search_titles = [
+                row["title"]
+                for rows in search_results.values()
+                for row in rows
+                if row.get("id") not in allowed_daily_ids
+            ]
+            search_read_contents = self.read_news(titles=search_titles, max_items=5)
+
+        expanded = dict(base_context)
+        expanded["read_contents"] = read_contents
+        expanded["search_results"] = search_results
+        expanded["search_read_contents"] = search_read_contents
+        return expanded
+
+    @staticmethod
+    def _normalize_selected_news(selected_news: list[Any]) -> tuple[list[str], list[str]]:
+        ids: list[str] = []
+        titles: list[str] = []
+        for item in selected_news[:3]:
+            if isinstance(item, dict):
+                raw_id = item.get("id")
+                raw_title = item.get("title")
+                if raw_id:
+                    ids.append(str(raw_id))
+                if raw_title:
+                    titles.append(str(raw_title))
+            else:
+                text = str(item).strip()
+                if not text:
+                    continue
+                if text.startswith("news_"):
+                    ids.append(text)
+                else:
+                    titles.append(text)
+        return ids, titles
+
+    @staticmethod
+    def _depth2_search_fields(
+        read_contents: list[dict[str, str]],
+        daily_titles: list[dict[str, str]],
+    ) -> list[dict[str, list[str]]]:
+        text = " ".join(
+            [row.get("title", "") + " " + row.get("content", "") for row in read_contents]
+            + [row.get("title", "") for row in daily_titles]
+        )
+        fields = []
+        for field in DEFAULT_DEPTH2_FIELDS:
+            keywords = [keyword for keyword in field["keywords"] if keyword in text]
+            if keywords:
+                fields.append({"field": field["field"], "keywords": keywords})
+        return fields[:4] or [dict(field) for field in DEFAULT_DEPTH2_FIELDS[:2]]
 
     @staticmethod
     def _load_csv(path: Path) -> list[dict[str, str]]:

@@ -20,7 +20,7 @@ def collect_context(
     previous_belief = memory_agent.get_previous_belief(agent["agent_id"], turn)
     portfolio_summary = memory_agent.get_portfolio_summary(agent["agent_id"], turn - 1)
     action_reason = memory_agent.get_last_action_reason(agent["agent_id"])
-    news_context = news_agent.build_base_context(date)
+    news_context = news_agent.build_base_context(date, int(agent.get("news_depth") or 1))
     market_features = fundamental_agent.get_market_features(date, config.STOCK_CODE)
     return {
         "agent_id": agent["agent_id"],

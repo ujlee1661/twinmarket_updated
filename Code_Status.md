@@ -82,4 +82,56 @@
 
 ## 구현 중 추가 결정 (Step 진행하며 누적)
 
-*(여기에 Step별로 새로 내린 임의 결정을 [D-10]부터 추가한다.)*
+### [D-10] 제공 입력 sys_1000은 CSV로 처리  (Step 1, 2026-06-02)
+- 무엇을: 원 계획의 `data/sys_1000.db` 대신 사용자가 제공한 `sys_1000.csv`를 `data/sys_1000.csv`로 두고, pool 로더가 SQLite `Profiles`와 CSV를 모두 지원하도록 구현했다.
+- 왜: 현재 작업 폴더에는 `sys_1000.db`가 없고 `sys_1000.csv`만 첨부되어 있다.
+- 영향: `twinmarket_kr/persona/select.py`의 `load_pool()`.
+- 되돌릴 때: `data/sys_1000.db`가 제공되면 같은 로더가 자동으로 DB를 우선 사용한다.
+
+### [D-11] fixed_slots.csv 자동 생성  (Step 1, 2026-06-02)
+- 무엇을: `fixed_slots.csv`가 없으면 Persona 설계 §5의 100개 슬롯을 `slots.py`에서 `data/fixed_slots.csv`로 생성한다.
+- 왜: 계획상 입력 파일이지만 현재 폴더에는 없고, 설계 문서에는 전체 슬롯 목록이 명시되어 있다.
+- 영향: `twinmarket_kr/persona/slots.py`, `data/fixed_slots.csv`.
+- 되돌릴 때: 외부 `fixed_slots.csv`를 제공하면 로더가 그 파일을 읽는다.
+
+### [D-12] Persona 선발 시드 = 2  (Step 1, 2026-06-02)
+- 무엇을: `RANDOM_SEED`를 2로 고정했다.
+- 왜: 2026-06-02 14:42에 사용자가 `sys_1000.csv`를 1000명 파일로 교체했다. 시드 2는 새 1000명 pool에서도 검증 기준인 젊은 남성 turnover > 고령층 turnover 방향성을 만족한다.
+- 영향: `config.py`, `scripts/01_build_persona.py` 실행 결과.
+- 되돌릴 때: 더 큰 pool이나 별도 실험 조건이 생기면 `config.py`의 `RANDOM_SEED`를 바꿔 재선발한다.
+
+### [D-13] agents 테이블에 news_depth 저장  (Step 1, 2026-06-02)
+- 무엇을: `agents` 스키마에 `news_depth` 컬럼을 추가하고 70명 Depth 1, 30명 Depth 2를 결정적 순서로 배정했다.
+- 왜: News 설계는 Depth를 페르소나 속성으로 요구하지만 Persona 스키마에는 별도 컬럼이 없었다.
+- 영향: `twinmarket_kr/db/schema.py`, `twinmarket_kr/persona/select.py`.
+- 되돌릴 때: Depth를 별도 설정 파일에서 관리하려면 `assign_news_depth()`와 agents DDL을 조정한다.
+
+### [D-14] `.env`/OpenAI 패키지 import는 optional 처리  (Step 0/6, 2026-06-02)
+- 무엇을: `python-dotenv`와 `openai` 패키지가 없어도 offline 검증 가능한 모듈은 import되도록 fallback을 두었다. 실제 LLM 호출 시에는 `openai` 설치와 `OPENROUTER_API_KEY`가 필요하다.
+- 왜: 현재 기본 Python 환경에는 해당 패키지가 설치되어 있지 않지만, 코드 구조와 deterministic 모듈 검증은 계속 진행해야 한다.
+- 영향: `config.py`, `twinmarket_kr/llm/client.py`, offline initial belief 생성.
+- 되돌릴 때: 프로젝트 가상환경에 requirements를 설치한 뒤 fallback은 유지해도 무해하다.
+
+### [D-15] Initial Belief offline 생성 모드  (Step 6, 2026-06-02)
+- 무엇을: API 키 없이도 `scripts/04_generate_initial_beliefs.py --offline`으로 페르소나 기반 템플릿 initial belief를 생성할 수 있게 했다.
+- 왜: 설계상 정식 Initial Belief는 LLM 생성물이지만, 현재 API 키/패키지가 없는 상태에서 Memory/Context 파이프라인을 검증하려면 turn=0 belief가 필요하다.
+- 영향: `twinmarket_kr/llm/belief.py`, `outputs/sim.db`의 현재 turn=0 belief 100개.
+- 되돌릴 때: `.env`와 requirements 설치 후 `scripts/04_generate_initial_beliefs.py`를 offline 없이 다시 실행하면 LLM 기반 belief로 덮어쓸 수 있다.
+
+### [D-16] 실제 시장/뉴스 데이터 미제공 상태에서 모듈 검증은 fixture 사용  (Step 3/4/5, 2026-06-02)
+- 무엇을: `stock_data.csv`와 `samsung_news_raw.pkl`이 아직 없어 Step 3/4는 임시 fixture로 로딩/조회 로직을 검증했다. 실제 데이터 적재는 파일 제공 후 실행한다.
+- 왜: 데이터가 없는 상태에서도 코드 경로, 파생지표 계산, 뉴스 도구 입출력, 매칭 엔진을 먼저 검증할 수 있다.
+- 영향: `FundamentalAgent`, `NewsAgent`, `ExchangeAgent` 검증 방식.
+- 되돌릴 때: `data/stock_data.csv`, `data/samsung_news_raw.pkl`을 넣고 `scripts/03_load_stock_data.py`, `scripts/02_prepare_news.py`를 실행한다.
+
+### [D-17] 뉴스 해석과 거래 전 시장 분석 프롬프트 연결  (Step 7/8, 2026-06-09)
+- 무엇을: `prompts/news_interpretation.txt`, `prompts/market_analysis.txt`를 `twinmarket_kr/llm/analysis.py`로 연결하고, `daily_cycle`에서 news_interpretation → update_belief → market_analysis → make_decision 순서로 호출한다.
+- 왜: `make_decision.txt`가 `market_analysis` 입력을 요구하도록 바뀌었고, 새 프롬프트가 코드에 연결되지 않으면 런타임 포맷 오류가 발생한다.
+- 영향: `twinmarket_kr/llm/analysis.py`, `twinmarket_kr/llm/decision.py`, `twinmarket_kr/core/daily_cycle.py`.
+- 되돌릴 때: `make_decision.txt`에서 `market_analysis` 입력을 제거하고 `decision.py` 시그니처를 이전 형태로 되돌린다.
+
+### [D-18] Depth별 뉴스 컨텍스트 materialization  (Step 4d/8, 2026-06-09)
+- 무엇을: `collect_context`는 agent의 `news_depth`를 NewsAgent에 전달한다. LLM의 `selected_news` 결과를 기준으로 Depth 1은 일일 뉴스 중 최대 3개 본문을 읽고, Depth 2는 최근 7일 키워드 검색 결과와 검색 결과 본문 최대 5개를 추가한다.
+- 왜: 기존 구현은 일일 제목 10개만 반환해 News 설계의 Depth 1/2 읽기 예산과 `read_news`/`search_news` 흐름이 실제 context에 반영되지 않았다.
+- 영향: `twinmarket_kr/agents/news_agent.py`, `twinmarket_kr/core/collect_context.py`, `twinmarket_kr/core/daily_cycle.py`.
+- 되돌릴 때: 완전한 tool-calling loop를 구현하면 `expand_context_from_selection()`을 OpenAI tool call 처리 루프로 대체한다.

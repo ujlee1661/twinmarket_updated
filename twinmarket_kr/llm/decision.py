@@ -71,6 +71,7 @@ def parse_decision_json(content: str, constraints: dict[str, Any] | None = None)
 async def make_decision(
     agent: dict[str, Any],
     today_belief: dict[str, Any],
+    market_analysis: dict[str, Any],
     portfolio_summary: str,
     trading_constraints: dict[str, Any],
     *,
@@ -80,6 +81,7 @@ async def make_decision(
     prompt = load_prompt("make_decision.txt").format(
         persona_prompt=agent["persona_prompt"],
         today_belief=json.dumps(today_belief, ensure_ascii=False, indent=2),
+        market_analysis=json.dumps(market_analysis, ensure_ascii=False, indent=2),
         portfolio_summary=portfolio_summary,
         trading_constraints=json.dumps(trading_constraints, ensure_ascii=False, indent=2),
     )

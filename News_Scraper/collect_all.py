@@ -4,7 +4,7 @@
 2025-01-01부터 오늘까지 날짜별로 세 카테고리를 수집하고
 Claude Haiku CLI로 카테고리별 200~250자 요약 후 저장.
 
-출력 파일 (twinmarket_kr_project/data/):
+출력 파일 (프로젝트 루트 data/):
     samsung_news.pkl       — 종목 뉴스 (카테고리별 보관용)
     sector_news.pkl        — 섹터 뉴스
     economy_news.pkl       — 경제 뉴스
@@ -28,7 +28,7 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "twinmarket_kr_project" / "data"
+DATA_DIR = PROJECT_ROOT / "data"
 
 import pandas as pd
 
