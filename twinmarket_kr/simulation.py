@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import random
 from collections import defaultdict
 from typing import Any
 
@@ -42,10 +43,16 @@ async def run_simulation(
     max_days: int | None = None,
     concurrency: int = 8,
     enable_logs: bool = True,
+    random_agents: bool = False,
+    random_seed: int = config.RANDOM_SEED,
 ) -> None:
     agents = load_agents_from_sys100(config.SYS_100_DB)
     if max_agents:
-        agents = agents[:max_agents]
+        if random_agents:
+            agents = random.Random(random_seed).sample(agents, min(max_agents, len(agents)))
+            agents.sort(key=lambda agent: agent["agent_id"])
+        else:
+            agents = agents[:max_agents]
     dates = trading_dates(max_days)
     if not dates:
         raise RuntimeError("No StockData rows found. Run scripts/03_load_stock_data.py first.")
@@ -65,6 +72,9 @@ async def run_simulation(
                 "agent_count": len(agents),
                 "date_count": len(dates),
                 "sim_db": str(config.SIM_DB),
+                "random_agents": random_agents,
+                "random_seed": random_seed,
+                "agent_ids": [agent["agent_id"] for agent in agents],
             }
         )
         if enable_logs

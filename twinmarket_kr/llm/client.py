@@ -66,4 +66,20 @@ class OpenRouterClient:
             [{"role": "user", "content": "Reply with pong."}],
             temperature=0,
         )
-        return response.choices[0].message.content or ""
+        return response_content(response)
+
+
+def response_content(response: Any) -> str:
+    if isinstance(response, str):
+        return response
+    if isinstance(response, dict):
+        choices = response.get("choices") or []
+        if choices:
+            message = choices[0].get("message") or {}
+            return str(message.get("content") or "")
+        return ""
+    choices = getattr(response, "choices", None) or []
+    if not choices:
+        return ""
+    message = getattr(choices[0], "message", None)
+    return str(getattr(message, "content", "") or "")

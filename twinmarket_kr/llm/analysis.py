@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from twinmarket_kr.llm.belief import load_prompt
-from twinmarket_kr.llm.client import OpenRouterClient
+from twinmarket_kr.llm.client import OpenRouterClient, response_content
 
 
 NEWS_INTERPRETATION_KEYS = (
@@ -60,7 +60,7 @@ async def interpret_news(
         temperature=0.2,
     )
     return parse_json_object(
-        response.choices[0].message.content or "{}",
+        response_content(response) or "{}",
         NEWS_INTERPRETATION_KEYS,
         "news interpretation",
     )
@@ -89,7 +89,7 @@ async def analyze_market(
         temperature=0.2,
     )
     return parse_json_object(
-        response.choices[0].message.content or "{}",
+        response_content(response) or "{}",
         MARKET_ANALYSIS_KEYS,
         "market analysis",
     )

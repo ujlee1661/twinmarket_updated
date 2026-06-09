@@ -6,7 +6,7 @@ from typing import Any
 
 import config
 from twinmarket_kr.agents.memory_agent import MemoryAgent
-from twinmarket_kr.llm.client import OpenRouterClient
+from twinmarket_kr.llm.client import OpenRouterClient, response_content
 
 
 BELIEF_KEYS = ("dim_1", "dim_2", "dim_3", "dim_4", "dim_5", "dim_6", "belief_summary", "view_change")
@@ -72,7 +72,7 @@ async def generate_initial_belief(
             response_format={"type": "json_object"},
             temperature=0.2,
         )
-        parsed = parse_belief_json(response.choices[0].message.content or "{}")
+        parsed = parse_belief_json(response_content(response) or "{}")
     belief = {"agent_id": agent["agent_id"], "turn": 0, "date": date, **parsed}
     if memory is not None:
         memory.save_belief(belief)
@@ -97,7 +97,7 @@ async def update_belief(
         response_format={"type": "json_object"},
         temperature=0.2,
     )
-    parsed = parse_belief_json(response.choices[0].message.content or "{}")
+    parsed = parse_belief_json(response_content(response) or "{}")
     belief = {
         "agent_id": agent["agent_id"],
         "turn": int(today_context["turn"]),

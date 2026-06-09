@@ -5,7 +5,7 @@ from typing import Any
 
 import config
 from twinmarket_kr.llm.belief import load_prompt
-from twinmarket_kr.llm.client import OpenRouterClient
+from twinmarket_kr.llm.client import OpenRouterClient, response_content
 
 
 DECISION_KEYS = ("action", "quantity", "order_type", "price", "reason", "risk_control")
@@ -90,4 +90,4 @@ async def make_decision(
         response_format={"type": "json_object"},
         temperature=0.2,
     )
-    return parse_decision_json(response.choices[0].message.content or "{}", trading_constraints)
+    return parse_decision_json(response_content(response) or "{}", trading_constraints)

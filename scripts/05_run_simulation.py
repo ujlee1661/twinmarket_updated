@@ -17,6 +17,8 @@ def main() -> None:
     parser.add_argument("--max-agents", type=int, default=None)
     parser.add_argument("--max-days", type=int, default=None)
     parser.add_argument("--concurrency", type=int, default=8)
+    parser.add_argument("--random-agents", action="store_true")
+    parser.add_argument("--seed", type=int, default=2)
     parser.add_argument("--no-logs", action="store_true", help="Disable detailed output logs.")
     args = parser.parse_args()
     asyncio.run(
@@ -25,6 +27,8 @@ def main() -> None:
             max_days=args.max_days,
             concurrency=args.concurrency,
             enable_logs=not args.no_logs,
+            random_agents=args.random_agents,
+            random_seed=args.seed,
         )
     )
 
