@@ -18,15 +18,19 @@ class SimulationLogger:
         root_dir: Path | str = config.LOG_DIR,
         run_id: str | None = None,
         metadata: dict[str, Any] | None = None,
-        overwrite_root: bool = True,
+        overwrite_root: bool = False,
     ) -> None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.run_id = run_id or f"simulation_{timestamp}"
         root = Path(root_dir)
         if overwrite_root and root.exists():
             shutil.rmtree(root)
-        self.run_dir = root / "current"
+        root.mkdir(parents=True, exist_ok=True)
+        self.run_dir = root / self.run_id
+        if self.run_dir.exists():
+            shutil.rmtree(self.run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self._update_current_pointer(root)
         self._lock = threading.Lock()
         self._agent_csv_fields = [
             "run_id",
@@ -259,6 +263,18 @@ class SimulationLogger:
         with path.open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
+
+    def _update_current_pointer(self, root: Path) -> None:
+        current = root / "current"
+        if current.exists() or current.is_symlink():
+            if current.is_dir() and not current.is_symlink():
+                shutil.rmtree(current)
+            else:
+                current.unlink()
+        try:
+            current.symlink_to(self.run_dir.name, target_is_directory=True)
+        except OSError:
+            shutil.copytree(self.run_dir, current)
 
     @staticmethod
     def _compact_agent(agent: dict[str, Any]) -> dict[str, Any]:

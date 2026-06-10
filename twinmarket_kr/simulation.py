@@ -18,6 +18,15 @@ from twinmarket_kr.run_logger import SimulationLogger
 
 
 def trading_dates(limit: int | None = None) -> list[str]:
+    return trading_dates_between(limit=limit)
+
+
+def trading_dates_between(
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int | None = None,
+) -> list[str]:
     with connect(config.SIM_DB) as conn:
         rows = conn.execute(
             "SELECT date FROM StockData WHERE stock_id = ? ORDER BY date",
@@ -27,6 +36,10 @@ def trading_dates(limit: int | None = None) -> list[str]:
     news_dates = _daily_news_dates()
     if news_dates:
         dates = [day for day in dates if day in news_dates]
+    if start_date:
+        dates = [day for day in dates if day >= start_date]
+    if end_date:
+        dates = [day for day in dates if day <= end_date]
     return dates[:limit] if limit else dates
 
 
@@ -45,17 +58,22 @@ async def run_simulation(
     enable_logs: bool = True,
     random_agents: bool = False,
     random_seed: int = config.RANDOM_SEED,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    balanced_depths: bool = False,
 ) -> None:
     agents = load_agents_from_sys100(config.SYS_100_DB)
     if max_agents:
         all_agents = agents
-        if random_agents:
+        if balanced_depths:
+            agents = _sample_balanced_depths(agents, max_agents, random_seed)
+        elif random_agents:
             agents = random.Random(random_seed).sample(agents, min(max_agents, len(agents)))
             agents.sort(key=lambda agent: agent["agent_id"])
         else:
             agents = agents[:max_agents]
         agents = _ensure_depth2_agent(agents, all_agents)
-    dates = trading_dates(max_days)
+    dates = trading_dates_between(start_date=start_date, end_date=end_date, limit=max_days)
     if not dates:
         raise RuntimeError("No StockData rows found. Run scripts/03_load_stock_data.py first.")
 
@@ -77,7 +95,11 @@ async def run_simulation(
                 "sim_db": str(config.SIM_DB),
                 "random_agents": random_agents,
                 "random_seed": random_seed,
+                "start_date": start_date,
+                "end_date": end_date,
+                "balanced_depths": balanced_depths,
                 "agent_ids": [agent["agent_id"] for agent in agents],
+                "agent_depths": {agent["agent_id"]: int(agent.get("news_depth") or 0) for agent in agents},
             }
         )
         if enable_logs
@@ -153,6 +175,43 @@ def _ensure_depth2_agent(agents: list[dict[str, Any]], all_agents: list[dict[str
         return depth2_agents[:1]
     replaced = [*agents[:-1], depth2_agents[0]]
     return sorted({agent["agent_id"]: agent for agent in replaced}.values(), key=lambda agent: agent["agent_id"])
+
+
+def _sample_balanced_depths(
+    agents: list[dict[str, Any]],
+    max_agents: int,
+    random_seed: int,
+) -> list[dict[str, Any]]:
+    if max_agents <= 0:
+        return []
+    rng = random.Random(random_seed)
+    by_depth: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for agent in agents:
+        by_depth[int(agent.get("news_depth") or 0)].append(agent)
+
+    depths = [0, 1, 2]
+    missing = [depth for depth in depths if not by_depth.get(depth)]
+    if missing:
+        raise RuntimeError(f"Depth 후보가 없습니다: {missing}")
+
+    base = max_agents // len(depths)
+    remainder = max_agents % len(depths)
+    quotas = {depth: base for depth in depths}
+    for depth in depths[:remainder]:
+        quotas[depth] += 1
+
+    selected: list[dict[str, Any]] = []
+    for depth in depths:
+        candidates = by_depth[depth]
+        take = min(quotas[depth], len(candidates))
+        selected.extend(rng.sample(candidates, take))
+
+    if len(selected) < max_agents:
+        selected_ids = {agent["agent_id"] for agent in selected}
+        remaining = [agent for agent in agents if agent["agent_id"] not in selected_ids]
+        selected.extend(rng.sample(remaining, min(max_agents - len(selected), len(remaining))))
+
+    return sorted(selected, key=lambda agent: agent["agent_id"])
 
 
 def _update_portfolios_from_results(

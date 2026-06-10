@@ -19,6 +19,9 @@ def main() -> None:
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--random-agents", action="store_true")
     parser.add_argument("--seed", type=int, default=2)
+    parser.add_argument("--start-date", default=None)
+    parser.add_argument("--end-date", default=None)
+    parser.add_argument("--balanced-depths", action="store_true")
     parser.add_argument("--no-logs", action="store_true", help="Disable detailed output logs.")
     args = parser.parse_args()
     asyncio.run(
@@ -29,6 +32,9 @@ def main() -> None:
             enable_logs=not args.no_logs,
             random_agents=args.random_agents,
             random_seed=args.seed,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            balanced_depths=args.balanced_depths,
         )
     )
 

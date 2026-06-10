@@ -58,6 +58,26 @@ def parse_json_object(content: str, required_keys: tuple[str, ...], label: str) 
     return data
 
 
+def with_defaults(data: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(data)
+    for key, value in defaults.items():
+        normalized.setdefault(key, value)
+    return normalized
+
+
+def parse_json_loose(content: str) -> dict[str, Any]:
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.startswith("json"):
+            text = text[4:].strip()
+    try:
+        data = json.loads(text or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 async def interpret_news(
     agent: dict[str, Any],
     news_context: dict[str, Any],
@@ -74,10 +94,18 @@ async def interpret_news(
         response_format={"type": "json_object"},
         temperature=0.2,
     )
-    return parse_json_object(
-        response_content(response) or "{}",
-        NEWS_INTERPRETATION_KEYS,
-        "news interpretation",
+    data = parse_json_loose(response_content(response) or "{}")
+    return with_defaults(
+        data,
+        {
+            "selected_news": [],
+            "news_sentiment": "neutral",
+            "short_term_impact": "",
+            "long_term_impact": "",
+            "persona_interpretation": "",
+            "confidence": "medium",
+            "reason": "",
+        },
     )
 
 
@@ -100,11 +128,16 @@ async def depth2_pre_search(
         response_format={"type": "json_object"},
         temperature=0.2,
     )
-    data = parse_json_object(
-        response_content(response) or "{}",
-        DEPTH2_PRE_SEARCH_KEYS,
-        "depth2 pre-search",
-    )
+    data = parse_json_loose(response_content(response) or "{}")
+    if "search_keywords" not in data:
+        data["search_keywords"] = data.get("keywords") or data.get("keyword_queries") or data.get("search_terms") or []
+    data = with_defaults(data, {
+        "search_needed": bool(data.get("search_keywords")),
+        "key_findings": "",
+        "curiosity_points": [],
+        "search_rationale": "",
+        "search_keywords": [],
+    })
     raw_needed = data.get("search_needed")
     if isinstance(raw_needed, str):
         data["search_needed"] = raw_needed.strip().lower() in {"true", "yes", "1", "필요", "필요함"}
@@ -139,11 +172,13 @@ async def depth2_post_search(
         response_format={"type": "json_object"},
         temperature=0.2,
     )
-    data = parse_json_object(
-        response_content(response) or "{}",
-        DEPTH2_POST_SEARCH_KEYS,
-        "depth2 post-search",
-    )
+    data = parse_json_loose(response_content(response) or "{}")
+    data = with_defaults(data, {
+        "new_findings": "",
+        "view_change": "유지",
+        "view_change_detail": "",
+        "unresolved_questions": [],
+    })
     if not isinstance(data.get("unresolved_questions"), list):
         data["unresolved_questions"] = []
     return data
@@ -171,8 +206,18 @@ async def analyze_market(
         response_format={"type": "json_object"},
         temperature=0.2,
     )
-    return parse_json_object(
-        response_content(response) or "{}",
-        MARKET_ANALYSIS_KEYS,
-        "market analysis",
+    data = parse_json_loose(response_content(response) or "{}")
+    return with_defaults(
+        data,
+        {
+            "market_view": "",
+            "valuation_view": "",
+            "technical_view": "",
+            "news_view": "",
+            "portfolio_view": "",
+            "key_risks": "",
+            "opportunity": "",
+            "caution": "",
+            "confidence": "medium",
+        },
     )

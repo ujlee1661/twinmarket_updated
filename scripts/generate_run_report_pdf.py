@@ -5,6 +5,7 @@ import csv
 import json
 import re
 import sqlite3
+import argparse
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -169,7 +170,18 @@ def page_footer(canvas, doc) -> None:
 
 
 def main() -> None:
+    global RUN_DIR, REPORT_PATH
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-dir", type=Path, default=RUN_DIR)
+    parser.add_argument("--output", type=Path, default=REPORT_PATH)
+    args = parser.parse_args()
+
+    RUN_DIR = args.run_dir
+    REPORT_PATH = args.output
+
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     font = register_font()
 
     styles = getSampleStyleSheet()
@@ -277,7 +289,12 @@ def main() -> None:
     story.append(para("1. 실행 개요", styles["KHeading1"]))
     overview = [
         ["항목", "내용"],
-        ["실행 조건", f"랜덤 에이전트 {meta['agent_count']}명, 초반 {meta['date_count']}거래일, seed={meta['random_seed']}, concurrency={meta['concurrency']}"],
+        [
+            "실행 조건",
+            f"에이전트 {meta['agent_count']}명, {meta['date_count']}거래일, "
+            f"기간={meta.get('start_date') or daily_rows[0]['date']}~{meta.get('end_date') or daily_rows[-1]['date']}, "
+            f"seed={meta['random_seed']}, concurrency={meta['concurrency']}, balanced_depths={meta.get('balanced_depths', False)}",
+        ],
         ["선택 에이전트", ", ".join(meta["agent_ids"])],
         ["전체 판단", f"총 {len(agent_rows)}건: 매수 {action_counts.get('buy', 0)}건, 보유 {action_counts.get('hold', 0)}건, 매도 {action_counts.get('sell', 0)}건"],
         ["주문/체결", f"제출 주문 {len(order_rows)}건, 제출 수량 {total_order_qty:,}주, 체결 수량 {total_fill_qty:,}주, 수수료 합계 {total_fees:,.0f}원"],
@@ -372,7 +389,7 @@ def main() -> None:
         story.append(table([[para(c, styles["KSmall"]) for c in row] for row in detail_data], [20 * mm, 40 * mm, 43 * mm, 43 * mm, 24 * mm]))
 
     story.append(PageBreak())
-    story.append(para("4. 에이전트별 5일 사고 흐름 및 최종 상태", styles["KHeading1"]))
+    story.append(para(f"4. 에이전트별 {meta['date_count']}거래일 사고 흐름 및 최종 상태", styles["KHeading1"]))
     for agent_id in meta["agent_ids"]:
         rows = by_agent[agent_id]
         profile = rows[0]["agent"]
@@ -440,7 +457,7 @@ def main() -> None:
                 money(state.get("cash")),
                 money(state.get("total_value_marked_final")),
                 pct(state.get("return_rate_marked_final")),
-                f"5일 중 매수 판단 {buys}회, 보유 판단 {holds}회. "
+                f"{meta['date_count']}거래일 중 매수 판단 {buys}회, 보유 판단 {holds}회. "
                 f"{short(rows[-1]['belief'].get('belief_summary'), 130)}",
             ]
         )
@@ -449,12 +466,11 @@ def main() -> None:
     story.append(para("6. 종합 결론", styles["KHeading1"]))
     story.append(
         para(
-            "이번 5거래일 실행에서는 모든 에이전트가 초반 AI·CES·반도체 기술 리더십 뉴스를 긍정적으로 해석하면서도, "
-            "실적 발표 전 목표가 하향과 업황 불확실성을 단기 리스크로 함께 반영했다. 결과적으로 1~3일차에는 매수 판단이 "
-            "우세했고, 4~5일차에는 이미 구축한 포지션과 가격 상승 부담 때문에 보유 판단이 늘었다. 특히 A011은 첫날부터 "
-            "가용 현금을 거의 전부 사용한 대규모 매수를 실행해 다른 에이전트와 뚜렷하게 구분되며, 나머지 에이전트들은 "
-            "100주 단위의 분할 매수와 현금 보존을 병행했다. 마지막 날에는 제출 주문이 있었지만 체결량이 0으로 기록되어, "
-            "의사결정과 실제 시장 체결 사이의 차이가 드러났다.",
+            f"이번 {meta['date_count']}거래일 실행은 depth 0/1/2가 섞인 소규모 샘플에서 뉴스 접근 깊이에 따른 "
+            "판단 로그와 주문 결과를 확인하기 위한 검증 실행이다. 보고서의 일자별 표와 에이전트별 흐름은 각 turn의 "
+            "뉴스 해석, belief 변화, 주문 판단, 체결 여부를 원 로그에서 집계한 것이다. Depth 2 에이전트는 추가 검색 "
+            "키워드와 검색 결과 수가 별도 컬럼으로 기록되므로, 후속 분석에서는 동일 날짜의 depth별 belief 변화와 "
+            "매수/보유/매도 판단 차이를 비교하는 방식으로 확장할 수 있다.",
             styles["KBody"],
         )
     )

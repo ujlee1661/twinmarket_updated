@@ -26,10 +26,14 @@ def parse_belief_json(content: str) -> dict[str, str]:
         text = text.strip("`")
         if text.startswith("json"):
             text = text[4:].strip()
-    data = json.loads(text)
-    missing = [key for key in BELIEF_KEYS if key not in data]
-    if missing:
-        raise ValueError(f"belief JSON missing keys: {missing}")
+    try:
+        data = json.loads(text or "{}")
+    except json.JSONDecodeError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    for key in BELIEF_KEYS:
+        data.setdefault(key, "")
     return {key: str(data[key]) for key in BELIEF_KEYS}
 
 

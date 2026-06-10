@@ -41,10 +41,21 @@ def parse_decision_json(content: str, constraints: dict[str, Any] | None = None)
         text = text.strip("`")
         if text.startswith("json"):
             text = text[4:].strip()
-    data = json.loads(text)
-    missing = [key for key in DECISION_KEYS if key not in data]
-    if missing:
-        raise ValueError(f"decision JSON missing keys: {missing}")
+    try:
+        data = json.loads(text or "{}")
+    except json.JSONDecodeError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    for key, default in {
+        "action": "hold",
+        "quantity": 0,
+        "order_type": "market",
+        "price": 0,
+        "reason": "",
+        "risk_control": "",
+    }.items():
+        data.setdefault(key, default)
     action = str(data["action"]).lower()
     if action not in {"buy", "sell", "hold"}:
         action = "hold"

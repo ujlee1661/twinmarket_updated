@@ -17,7 +17,8 @@ class OpenRouterClient:
         api_key: str | None = None,
         base_url: str | None = None,
         model: str | None = None,
-        max_retries: int = 3,
+        max_retries: int = 2,
+        timeout: float = 60.0,
     ) -> None:
         self.api_key = api_key or config.OPENROUTER_API_KEY
         self.base_url = base_url or config.OPENROUTER_BASE_URL
@@ -27,7 +28,7 @@ class OpenRouterClient:
             raise ValueError("OPENROUTER_API_KEY is not set.")
         if AsyncOpenAI is None:
             raise RuntimeError("openai package is not installed. Run pip install -r requirements.txt.")
-        self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+        self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url, timeout=timeout)
 
     async def chat(
         self,
