@@ -63,7 +63,7 @@ async def run_agent_turn(
             "view_change_detail": "추가 검색을 수행하지 않았습니다.",
             "unresolved_questions": [],
         }
-        if pre_search.get("search_needed") and pre_search.get("search_keywords"):
+        if pre_search.get("search_keywords"):
             search_results = news_agent.search_news_flat(
                 keywords=list(pre_search.get("search_keywords") or []),
                 current_date=date,
