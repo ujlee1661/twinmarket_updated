@@ -226,7 +226,6 @@ class SimulationLogger:
                 },
             )
             for tx in transactions:
-                fee = abs(float(tx.get("executed_price", 0)) * int(tx.get("executed_quantity", 0))) * config.COMMISSION_RATE
                 self.append_csv(
                     "exchange_fills.csv",
                     self._fills_csv_fields,
@@ -239,7 +238,7 @@ class SimulationLogger:
                         "direction": tx.get("direction"),
                         "executed_price": tx.get("executed_price"),
                         "executed_quantity": tx.get("executed_quantity"),
-                        "fee": fee,
+                        "fee": 0.0,
                     },
                 )
 

@@ -240,7 +240,7 @@ def _update_portfolios_from_results(
                     "direction": tx.get("direction"),
                     "quantity": quantity,
                     "price": price,
-                    "fee": abs(quantity * price) * config.COMMISSION_RATE,
+                    "fee": 0.0,
                 }
             )
     submitted_agent_ids = {str(order.get("user_id")) for order in orders if order.get("user_id")}
